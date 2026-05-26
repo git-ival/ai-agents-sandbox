@@ -433,12 +433,7 @@ run() {
                     return "$SUCCESS"
                 fi
             };;
-            exited)  {
-                print_info "Resuming existing container..."
-                podman start -ai "$CTN_NAME"
-                return "$SUCCESS"
-            };;
-            initialized|created|configured) {
+            initialized|created|configured|exited) {
                 print_info "Starting existing container from state '$STATE'..."
                 podman start -ai "$CTN_NAME"
                 return "$SUCCESS"
