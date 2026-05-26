@@ -222,8 +222,7 @@ _check_macos_no_vpn() {
     if command -v scutil > /dev/null 2>&1; then
         if scutil --nc list 2>/dev/null | grep -qi 'connected'; then
             print_error "Active VPN detected via macOS Network Configuration."
-            print_error "  -> Disable all VPN connections before running"
-            print_error "     the sandbox."
+            print_error "  -> Disable all VPN connections before running the sandbox"
             _ret="$FAILURE"
         fi
     fi
@@ -246,6 +245,92 @@ _check_macos_no_vpn() {
         print_error "  -> Disable all VPN connections before running"
         print_error "     the sandbox."
         _ret="$FAILURE"
+    fi
+
+    return "$_ret"
+}
+
+# Enforce network policy for current host routing state.
+_network_policy_allows_runtime() {
+    _ret="$SUCCESS"
+
+    if [ "$(uname -s)" = "Darwin" ]; then
+        if ! _check_macos_no_vpn; then
+            _ret="$FAILURE"
+        fi
+        if [ "$_ret" = "$SUCCESS" ] &&
+            ! _detect_public_iface > /dev/null; then
+            print_error "Default route is through a VPN interface."
+            print_error "Aborting to avoid unrestricted egress."
+            _ret="$FAILURE"
+        fi
+    else
+        if ! _detect_public_iface > /dev/null; then
+            print_error "Could not detect a public non-VPN interface."
+            print_error "Aborting to avoid unrestricted egress."
+            _ret="$FAILURE"
+        fi
+    fi
+
+    return "$_ret"
+}
+
+# Monitor runtime network policy and stop the container on violation.
+_monitor_container_network_policy() {
+    _ctn="$1"
+    _ret="$SUCCESS"
+    _seen_running=0
+
+    while :; do
+        _state="$(podman inspect "$_ctn" --format '{{.State.Status}}' \
+            2>/dev/null)"
+        case "$_state" in
+            running)
+                _seen_running=1
+                if ! _network_policy_allows_runtime; then
+                    print_error "Network policy violation detected."
+                    print_error "Stopping container '${_ctn}'..."
+                    if ! podman stop -t 3 "$_ctn" > /dev/null 2>&1; then
+                        podman kill "$_ctn" > /dev/null 2>&1
+                    fi
+                    _ret="$FAILURE"
+                    break
+                fi
+                ;;
+            exited|configured|created|initialized)
+                if [ "$_seen_running" = "1" ]; then
+                    break
+                fi
+                ;;
+            "")
+                if [ "$_seen_running" = "1" ]; then
+                    break
+                fi
+                ;;
+        esac
+        sleep 2
+    done
+
+    return "$_ret"
+}
+
+# Run a podman command while network policy monitor is active.
+_run_with_policy_monitor() {
+    _ctn="$1"
+    shift
+    _ret="$SUCCESS"
+    _monitor_pid=""
+
+    _monitor_container_network_policy "$_ctn" &
+    _monitor_pid="$!"
+
+    if ! "$@"; then
+        _ret="$FAILURE"
+    fi
+
+    if [ -n "$_monitor_pid" ]; then
+        kill "$_monitor_pid" > /dev/null 2>&1
+        wait "$_monitor_pid" 2>/dev/null
     fi
 
     return "$_ret"
@@ -396,21 +481,11 @@ run() {
     fi
 
     _iface=""
-    if [ "$(uname -s)" = "Darwin" ]; then
-        if ! _check_macos_no_vpn; then
-            return "$FAILURE"
-        fi
-        if ! _detect_public_iface > /dev/null; then
-            print_error "Default route is through a VPN interface."
-            print_error "Aborting to avoid unrestricted egress."
-            return "$FAILURE"
-        fi
-    else
-        if ! _iface="$(_detect_public_iface)"; then
-            print_error "Could not detect a public non-VPN interface."
-            print_error "Aborting to avoid unrestricted egress."
-            return "$FAILURE"
-        fi
+    if ! _network_policy_allows_runtime; then
+        return "$FAILURE"
+    fi
+    if [ "$(uname -s)" != "Darwin" ]; then
+        _iface="$(_detect_public_iface)"
     fi
 
     # Resume a stopped container
@@ -429,14 +504,20 @@ run() {
                     print_info "Creating a new one with suffixe $CTN_NAME."
                 else
                     print_info "Attaching to running container..."
-                    podman exec -it "$CTN_NAME" bash
-                    return "$SUCCESS"
+                    if ! _run_with_policy_monitor "$CTN_NAME" \
+                        podman exec -it "$CTN_NAME" bash; then
+                        _ret="$FAILURE"
+                    fi
+                    return "$_ret"
                 fi
             };;
             initialized|created|configured|exited) {
                 print_info "Starting existing container from state '$STATE'..."
-                podman start -ai "$CTN_NAME"
-                return "$SUCCESS"
+                if ! _run_with_policy_monitor "$CTN_NAME" \
+                    podman start -ai "$CTN_NAME"; then
+                    _ret="$FAILURE"
+                fi
+                return "$_ret"
             };;
             *)       {
                 print_error "Container '$CTN_NAME' is in state '$STATE'"
@@ -490,7 +571,8 @@ run() {
     print_info "Starting isolated container..."
     _cmd="podman run -it $_args ${_run_img}"
     print_debug "$_cmd"
-    if ! eval "$_cmd"; then
+    if ! _run_with_policy_monitor "$CTN_NAME" \
+        podman run -it "$@" "${_run_img}"; then
         print_error "Failed to start container ${CTN_NAME}."
         _ret="$FAILURE"
     fi
