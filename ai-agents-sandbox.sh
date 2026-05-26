@@ -211,6 +211,45 @@ _detect_public_iface() {
     return "$_ret"
 }
 
+# Detect active VPN connections on macOS; returns FAILURE if any are found.
+# Checks both macOS Network Configuration and raw interface state.
+_check_macos_no_vpn() {
+    _ret="$SUCCESS"
+
+    # scutil --nc list covers VPN clients using the macOS NC framework
+    # (Cisco AnyConnect, built-in VPN, etc.)
+    if command -v scutil > /dev/null 2>&1; then
+        if scutil --nc list 2>/dev/null | grep -qi 'connected'; then
+            print_error "Active VPN detected via macOS Network Configuration."
+            print_error "  -> Disable all VPN connections before running"
+            print_error "     the sandbox."
+            _ret="$FAILURE"
+        fi
+    fi
+
+    # utun/ppp ifaces with an IPv4 inet address signal an active VPN tunnel.
+    # System-owned utun ifaces (AirDrop, iCloud, etc.) only carry IPv6.
+    _vpn_ifaces=""
+    for _vi in $(ifconfig -l 2>/dev/null \
+                 | tr ' ' '\n' | grep -E '^(utun|ppp)[0-9]'); do
+        if ifconfig "$_vi" 2>/dev/null | grep -q 'inet [0-9]'; then
+            if [ -z "$_vpn_ifaces" ]; then
+                _vpn_ifaces="$_vi"
+            else
+                _vpn_ifaces="$_vpn_ifaces $_vi"
+            fi
+        fi
+    done
+    if [ -n "$_vpn_ifaces" ]; then
+        print_error "Active VPN tunnel interface(s): $_vpn_ifaces"
+        print_error "  -> Disable all VPN connections before running"
+        print_error "     the sandbox."
+        _ret="$FAILURE"
+    fi
+
+    return "$_ret"
+}
+
 # check if a local image exists
 _image_exists() {
     _img="$1"
@@ -406,9 +445,23 @@ run() {
         --userns=keep-id \
         --hostname ai-sandbox \
         --pids-limit 1024
+    # On macOS, slirp4netns:outbound_addr cannot bind at the host level
+    # because containers run inside Podman Machine (Linux VM) and all
+    # traffic is proxied through gvproxy on the macOS host using macOS
+    # system routing (which includes VPN routes). Interface binding via
+    # outbound_addr only operates within the VM, not at the gvproxy layer.
+    # Equivalent protection is achieved by detecting and rejecting any
+    # active VPN before starting the container (fail-close).
     if [ "$(uname -s)" = "Darwin" ]; then
-        print_warning "macOS network path cannot enforce outbound_addr binding."
-        print_warning "Using slirp4netns with pinned public DNS resolvers."
+        if ! _check_macos_no_vpn; then
+            return "$FAILURE"
+        fi
+        if ! _detect_public_iface > /dev/null; then
+            print_error "Default route is through a VPN interface."
+            print_error "Aborting to avoid unrestricted egress."
+            return "$FAILURE"
+        fi
+        print_info "VPN checks passed; using slirp4netns with pinned DNS."
         set -- "$@" --network slirp4netns
         set -- "$@" --dns 1.1.1.1 --dns 8.8.8.8
     else
