@@ -90,16 +90,14 @@ _sed_inplace() {
     _expr="$1"
     _target="$2"
     _tmp="${_target}.tmp.$$"
+    _ret="$SUCCESS"
 
-    if ! sed "$_expr" "$_target" > "$_tmp"; then
+    if ! sed "$_expr" "$_target" > "$_tmp" || ! mv "$_tmp" "$_target"; then
         rm -f "$_tmp"
-        return "$FAILURE"
+        _ret="$FAILURE"
     fi
-    if ! mv "$_tmp" "$_target"; then
-        rm -f "$_tmp"
-        return "$FAILURE"
-    fi
-    return "$SUCCESS"
+
+    return "$_ret"
 }
 
 # update version in entrypoint.sh
@@ -187,20 +185,30 @@ another VM."
 # Detect the default public-facing interface, excluding VPN/tunnel interfaces.
 # Returns the first default-route interface not matching tun|wg|vpn|tap|ppp.
 _detect_public_iface() {
+    _ret="$SUCCESS"
+    _iface=""
+
     if command -v ip > /dev/null 2>&1; then
-        ip route show default \
+        _iface="$(ip route show default \
             | awk '{print $5}' \
             | grep -Ev 'tun|wg|vpn|tap|ppp' \
-            | head -1
-        return "$SUCCESS"
-    fi
-
-    if [ "$(uname -s)" = "Darwin" ]; then
-        route -n get default 2>/dev/null \
+            | head -1)"
+    elif command -v route > /dev/null 2>&1; then
+        _iface="$(route -n get default 2>/dev/null \
             | awk '/interface:/{print $2; exit}' \
             | grep -Ev 'tun|wg|vpn|tap|ppp' \
-            | head -1
+            | head -1)"
+    else
+        _ret="$FAILURE"
     fi
+
+    if [ -n "$_iface" ]; then
+        printf "%s\n" "$_iface"
+    else
+        _ret="$FAILURE"
+    fi
+
+    return "$_ret"
 }
 
 # check if a local image exists
@@ -336,8 +344,9 @@ run() {
         TOOLS_NEEDED="$TOOLS_NEEDED krun"
         CTN_NAME="${CTN_NAME}-microvm"
     else
+        TOOLS_NEEDED="$TOOLS_NEEDED slirp4netns"
         if [ "$(uname -s)" != "Darwin" ]; then
-            TOOLS_NEEDED="$TOOLS_NEEDED slirp4netns ip"
+            TOOLS_NEEDED="$TOOLS_NEEDED ip"
         fi
     fi
     if ! _check_tools_needed; then
@@ -398,17 +407,19 @@ run() {
         --hostname ai-sandbox \
         --pids-limit 1024
     if [ "$(uname -s)" = "Darwin" ]; then
+        print_warning "macOS network path cannot enforce outbound_addr binding."
+        print_warning "Using slirp4netns with pinned public DNS resolvers."
         set -- "$@" --network slirp4netns
+        set -- "$@" --dns 1.1.1.1 --dns 8.8.8.8
     else
-        _iface=$(_detect_public_iface)
-        if [ -n "$_iface" ]; then
+        if _iface="$(_detect_public_iface)"; then
             print_info "Binding outbound network to interface: $_iface"
             set -- "$@" --network "slirp4netns:outbound_addr=${_iface}"
             set -- "$@" --dns 1.1.1.1 --dns 8.8.8.8
         else
-            print_warning "Could not detect a public interface;"
-            print_warning "falling back to default slirp4netns."
-            set -- "$@" --network slirp4netns
+            print_error "Could not detect a public non-VPN interface."
+            print_error "Aborting to avoid unrestricted egress."
+            return "$FAILURE"
         fi
     fi
     if [ "$USE_MICROVM" = "1" ]; then
