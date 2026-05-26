@@ -41,7 +41,7 @@ ACTION=""
 ALL=false
 TOOLS_NEEDED="podman sed grep"
 
-# usefull var
+# useful var
 MIN_LIBKRUN_VER="1.18.0"
 
 # ========
@@ -73,8 +73,8 @@ _check_tools_needed() {
     return "$_ret"
 }
 
-# check if agent is valide
-_valide_agent() {
+# check if agent is valid
+_valid_agent() {
     _ret="$FAILURE"
     for _agt_v in $VALID_AGENTS; do
         if [ "$AGENT" = "$_agt_v" ]; then
@@ -452,7 +452,7 @@ for _arg in "$@"; do
 done
 
 if [ "$AGENT" != "" ]; then
-    if ! _valide_agent ; then
+    if ! _valid_agent ; then
         print_error "Unknown agent: '$AGENT'. Valid agents: $VALID_AGENTS"
         exit $FAILURE
     else
