@@ -394,6 +394,24 @@ run() {
         return "$FAILURE"
     fi
 
+    _iface=""
+    if [ "$(uname -s)" = "Darwin" ]; then
+        if ! _check_macos_no_vpn; then
+            return "$FAILURE"
+        fi
+        if ! _detect_public_iface > /dev/null; then
+            print_error "Default route is through a VPN interface."
+            print_error "Aborting to avoid unrestricted egress."
+            return "$FAILURE"
+        fi
+    else
+        if ! _iface="$(_detect_public_iface)"; then
+            print_error "Could not detect a public non-VPN interface."
+            print_error "Aborting to avoid unrestricted egress."
+            return "$FAILURE"
+        fi
+    fi
+
     # Resume a stopped container
     if podman container exists "$CTN_NAME"; then
         STATE=$(podman inspect "$CTN_NAME" --format '{{.State.Status}}')
@@ -453,19 +471,11 @@ run() {
     # Equivalent protection is achieved by detecting and rejecting any
     # active VPN before starting the container (fail-close).
     if [ "$(uname -s)" = "Darwin" ]; then
-        if ! _check_macos_no_vpn; then
-            return "$FAILURE"
-        fi
-        if ! _detect_public_iface > /dev/null; then
-            print_error "Default route is through a VPN interface."
-            print_error "Aborting to avoid unrestricted egress."
-            return "$FAILURE"
-        fi
         print_info "VPN checks passed; using slirp4netns with pinned DNS."
         set -- "$@" --network slirp4netns
         set -- "$@" --dns 1.1.1.1 --dns 8.8.8.8
     else
-        if _iface="$(_detect_public_iface)"; then
+        if [ -n "$_iface" ]; then
             print_info "Binding outbound network to interface: $_iface"
             set -- "$@" --network "slirp4netns:outbound_addr=${_iface}"
             set -- "$@" --dns 1.1.1.1 --dns 8.8.8.8
