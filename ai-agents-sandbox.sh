@@ -85,18 +85,43 @@ _valid_agent() {
     return "$_ret"
 }
 
+# apply sed replacement and atomically update a file
+_sed_inplace() {
+    _expr="$1"
+    _target="$2"
+    _tmp="${_target}.tmp.$$"
+
+    if ! sed "$_expr" "$_target" > "$_tmp"; then
+        rm -f "$_tmp"
+        return "$FAILURE"
+    fi
+    if ! mv "$_tmp" "$_target"; then
+        rm -f "$_tmp"
+        return "$FAILURE"
+    fi
+    return "$SUCCESS"
+}
+
 # update version in entrypoint.sh
 _update_entrypoint_version() {
-    sed -i\
-        "s/AI Agents Sandbox v[0-9]\+\.[0-9]\+\.[0-9]\+/AI Agents Sandbox v${IMG_TAG}/g"\
-        "${IMG_D}/scripts/entrypoint.sh"
+    _target="${IMG_D}/scripts/entrypoint.sh"
+    _expr="s/AI Agents Sandbox v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*/AI Agents Sandbox v${IMG_TAG}/g"
+    if ! _sed_inplace "$_expr" "$_target"; then
+        print_error "Failed to update version in ${_target}."
+        return "$FAILURE"
+    fi
+    return "$SUCCESS"
 }
 
 # update version in Containerfile
 _update_containerfile_version() {
-    sed -i\
-        "s/version=\"[0-9]\+\.[0-9]\+\.[0-9]\+\"/version=\"${IMG_TAG}\"/g" \
-        "${IMG_D}/Containerfile"
+    _target="${IMG_D}/Containerfile"
+    _expr="s/version=\"[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\"/version=\"${IMG_TAG}\"/g"
+    if ! _sed_inplace "$_expr" "$_target"; then
+        print_error "Failed to update version in ${_target}."
+        return "$FAILURE"
+    fi
+    return "$SUCCESS"
 }
 
 _check_microvm() {
@@ -162,10 +187,26 @@ another VM."
 # Detect the default public-facing interface, excluding VPN/tunnel interfaces.
 # Returns the first default-route interface not matching tun|wg|vpn|tap|ppp.
 _detect_public_iface() {
-    ip route show default \
-        | awk '{print $5}' \
-        | grep -Ev 'tun|wg|vpn|tap|ppp' \
-        | head -1
+    if command -v ip > /dev/null 2>&1; then
+        ip route show default \
+            | awk '{print $5}' \
+            | grep -Ev 'tun|wg|vpn|tap|ppp' \
+            | head -1
+        return "$SUCCESS"
+    fi
+
+    if [ "$(uname -s)" = "Darwin" ]; then
+        route -n get default 2>/dev/null \
+            | awk '/interface:/{print $2; exit}' \
+            | grep -Ev 'tun|wg|vpn|tap|ppp' \
+            | head -1
+    fi
+}
+
+# check if a local image exists
+_image_exists() {
+    _img="$1"
+    podman image exists "$_img"
 }
 
 # ================
@@ -206,8 +247,10 @@ print_version() {
 build() {
     _ret="$SUCCESS"
     print_info "Building container image ${IMG_NAME}:${IMG_TAG} ..."
-    _update_entrypoint_version
-    _update_containerfile_version
+    if ! _update_entrypoint_version || ! _update_containerfile_version; then
+        print_error "Failed to prepare version metadata before build."
+        return "$FAILURE"
+    fi
     if ! podman build \
         --build-arg "AGENT=${AGENT}" \
         --tag "${IMG_NAME}:${IMG_TAG}" \
@@ -225,7 +268,30 @@ build() {
 # callback for run action
 run() {
     _ret="$SUCCESS"
-    
+    _run_img="${IMG_NAME}:latest"
+    _agent_label="$AGENT"
+
+    if [ "$AGENT" = "$VALID_AGENTS" ]; then
+        _agent_label="all"
+    fi
+
+    if ! _image_exists "$_run_img"; then
+        if [ "$AGENT" != "$VALID_AGENTS" ] &&
+            _image_exists "ai-agents-sandbox:latest"; then
+            print_warning "Image '$_run_img' not found locally."
+            print_warning "Falling back to 'ai-agents-sandbox:latest'."
+            _run_img="ai-agents-sandbox:latest"
+        else
+            print_error "Image '$_run_img' not found locally."
+            print_error "Build it first with: sh ai-agents-sandbox.sh build"
+            if [ "$AGENT" != "$VALID_AGENTS" ]; then
+                print_error "Or build this agent with:"
+                print_error "  sh ai-agents-sandbox.sh build ${AGENT}"
+            fi
+            return "$FAILURE"
+        fi
+    fi
+
     if [ "$(uname -s)" = "Darwin" ] && [ "$USE_MICROVM" = "1" ]; then
         print_warning "[!] macOS detected — KVM is not available;"
         print_warning "    -> running without microVM isolation"
@@ -248,13 +314,13 @@ run() {
             USE_MICROVM=0
         else
             print_info "Running sandbox with microVM isolation for agent \
-'${AGENT}'..."
+'${_agent_label}'..."
         fi
     else
         print_warning "Running sandbox without microVM isolation for agent \
-'${AGENT}' (not recommended)..."
+'${_agent_label}' (not recommended)..."
     fi
-    
+
     _home_volume="$CTN_NAME-home"
     if podman volume exists "$_home_volume"; then
         print_debug "Using existing home volume '$_home_volume'."
@@ -270,7 +336,9 @@ run() {
         TOOLS_NEEDED="$TOOLS_NEEDED krun"
         CTN_NAME="${CTN_NAME}-microvm"
     else
-        TOOLS_NEEDED="$TOOLS_NEEDED slirp4netns ip"
+        if [ "$(uname -s)" != "Darwin" ]; then
+            TOOLS_NEEDED="$TOOLS_NEEDED slirp4netns ip"
+        fi
     fi
     if ! _check_tools_needed; then
         print_error "Required tools for the selected isolation are missing."
@@ -303,6 +371,11 @@ run() {
                 podman start -ai "$CTN_NAME"
                 return "$SUCCESS"
             };;
+            initialized|created|configured) {
+                print_info "Starting existing container from state '$STATE'..."
+                podman start -ai "$CTN_NAME"
+                return "$SUCCESS"
+            };;
             *)       {
                 print_error "Container '$CTN_NAME' is in state '$STATE'"
                 print_error "  -> Cannot attach or resume."
@@ -324,24 +397,28 @@ run() {
         --userns=keep-id \
         --hostname ai-sandbox \
         --pids-limit 1024
-    _iface=$(_detect_public_iface)
-    if [ -n "$_iface" ]; then
-        print_info "Binding outbound network to interface: $_iface"
-        set -- "$@" --network "slirp4netns:outbound_addr=${_iface}"
-        set -- "$@" --dns 1.1.1.1 --dns 8.8.8.8
-    else
-        print_warning "Could not detect a public interface;"
-        print_warning "falling back to default slirp4netns."
+    if [ "$(uname -s)" = "Darwin" ]; then
         set -- "$@" --network slirp4netns
+    else
+        _iface=$(_detect_public_iface)
+        if [ -n "$_iface" ]; then
+            print_info "Binding outbound network to interface: $_iface"
+            set -- "$@" --network "slirp4netns:outbound_addr=${_iface}"
+            set -- "$@" --dns 1.1.1.1 --dns 8.8.8.8
+        else
+            print_warning "Could not detect a public interface;"
+            print_warning "falling back to default slirp4netns."
+            set -- "$@" --network slirp4netns
+        fi
     fi
     if [ "$USE_MICROVM" = "1" ]; then
-        # Avaialble on crun > 1.27, below /.krun_config.json in the image is
+        # Available on crun > 1.27, below /.krun_config.json in the image is
         # required
         set -- "$@" --annotation krun.ram_mib=4096 --annotation krun.cpus=2
     fi
     _args=$*
     print_info "Starting isolated container..."
-    _cmd="podman run -it $_args ${IMG_NAME}:latest"
+    _cmd="podman run -it $_args ${_run_img}"
     print_debug "$_cmd"
     if ! eval "$_cmd"; then
         print_error "Failed to start container ${CTN_NAME}."
