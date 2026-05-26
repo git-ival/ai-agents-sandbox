@@ -102,13 +102,14 @@ _sed_inplace() {
 
 # update version in entrypoint.sh
 _update_entrypoint_version() {
+    _ret="$SUCCESS"
     _target="${IMG_D}/scripts/entrypoint.sh"
     _expr="s/AI Agents Sandbox v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*/AI Agents Sandbox v${IMG_TAG}/g"
     if ! _sed_inplace "$_expr" "$_target"; then
         print_error "Failed to update version in ${_target}."
-        return "$FAILURE"
+        _ret="$FAILURE"
     fi
-    return "$SUCCESS"
+    return "$_ret"
 }
 
 # update version in Containerfile
