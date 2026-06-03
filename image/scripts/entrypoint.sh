@@ -159,11 +159,17 @@ if agent_enabled "opencode"; then
         _oc_cfg="$_oc_dir/config.json"
         _oc_legacy="$_oc_dir/opencode.json"
         _oc_loc="${VERTEX_LOCATION:-global}"
+        _oc_ollama="${OPENCODE_OLLAMA_BASE_URL:-http://127.0.0.1:11434/v1}"
         _oc_project="${GOOGLE_CLOUD_PROJECT:-}"
+        case "$_oc_ollama" in
+                http://*|https://*) ;;
+                *) _oc_ollama="http://${_oc_ollama}" ;;
+        esac
         cat > "$_oc_cfg" << EOF
 {
     "\$schema": "https://opencode.ai/config.json",
     "enabled_providers": [
+        "ollama",
         "google-vertex"
     ],
     "provider": {
@@ -174,9 +180,21 @@ if agent_enabled "opencode"; then
                 "projectId": "$_oc_project",
                 "location": "$_oc_loc"
             }
+        },
+        "ollama": {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "Ollama",
+            "options": {
+                "baseURL": "$_oc_ollama"
+            },
+            "models": {
+                "default:latest": {
+                    "name": "default:latest"
+                }
+            }
         }
     },
-    "model": "google-vertex/gemini-2.0-flash"
+    "model": "ollama/default:latest"
 }
 EOF
         cp "$_oc_cfg" "$_oc_legacy" 2>/dev/null || true
