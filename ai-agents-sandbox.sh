@@ -46,13 +46,13 @@ ALL=false
 OLLAMA_URL=""
 TOOLS_NEEDED="podman sed grep"
 
-# Ollama VPN proxy variables
-_MACOS_OLLAMA_SCHEME="http"
-_MACOS_OLLAMA_HOST=""
-_MACOS_OLLAMA_PORT="11434"
-_MACOS_OLLAMA_IP=""
-_MACOS_OLLAMA_PROXY_PID=""
-_MACOS_OLLAMA_SOCK="/tmp/ai-sandbox-ollama.sock"
+# Ollama VPN proxy variables (shared by macOS and Linux paths)
+_OLLAMA_SCHEME="http"
+_OLLAMA_HOST=""
+_OLLAMA_PORT="11434"
+_OLLAMA_IP=""
+_OLLAMA_PROXY_PID=""
+_OLLAMA_SOCK="/tmp/ai-sandbox-ollama.sock"
 _MACOS_OLLAMA_ENFORCER_CONF="/tmp/ai-sandbox-enforcer.conf"
 
 # useful var
@@ -284,58 +284,58 @@ _handle_macos_vpn_state() {
 }
 
 # parse --ollama argument: normalize scheme, split host and port
-_parse_MACOS_OLLAMA_url() {
+_parse_OLLAMA_url() {
     _url="$1"
-    _MACOS_OLLAMA_SCHEME="http"
+    _OLLAMA_SCHEME="http"
     case "$_url" in
-        https://*) _MACOS_OLLAMA_SCHEME="https" ;;
-        http://*)  _MACOS_OLLAMA_SCHEME="http" ;;
+        https://*) _OLLAMA_SCHEME="https" ;;
+        http://*)  _OLLAMA_SCHEME="http" ;;
     esac
     _url="${_url#http://}"
     _url="${_url#https://}"
     _url="${_url%/}"
     case "$_url" in
         *:*)
-            _MACOS_OLLAMA_HOST="${_url%:*}"
-            _MACOS_OLLAMA_PORT="${_url##*:}"
+            _OLLAMA_HOST="${_url%:*}"
+            _OLLAMA_PORT="${_url##*:}"
             ;;
         *)
-            _MACOS_OLLAMA_HOST="$_url"
-            _MACOS_OLLAMA_PORT="11434"
+            _OLLAMA_HOST="$_url"
+            _OLLAMA_PORT="11434"
             ;;
     esac
-    if [ -z "$_MACOS_OLLAMA_HOST" ]; then
+    if [ -z "$_OLLAMA_HOST" ]; then
         print_error "Invalid --ollama value: $1"
         print_error \
             "  Expected: hostname:port or hostname"
         return "$FAILURE"
     fi
-    case "$_MACOS_OLLAMA_PORT" in
+    case "$_OLLAMA_PORT" in
         *[!0-9]*)
             print_error \
-                "Invalid --ollama port: $_MACOS_OLLAMA_PORT"
+                "Invalid --ollama port: $_OLLAMA_PORT"
             return "$FAILURE"
             ;;
     esac
-    if [ "$_MACOS_OLLAMA_PORT" -lt 1 ] || \
-        [ "$_MACOS_OLLAMA_PORT" -gt 65535 ]; then
+    if [ "$_OLLAMA_PORT" -lt 1 ] || \
+        [ "$_OLLAMA_PORT" -gt 65535 ]; then
         print_error \
-            "Port out of range: $_MACOS_OLLAMA_PORT (1-65535)"
+            "Port out of range: $_OLLAMA_PORT (1-65535)"
         return "$FAILURE"
     fi
     return "$SUCCESS"
 }
 
-# resolve Ollama hostname to an IPv4 address; sets _MACOS_OLLAMA_IP.
+# resolve Ollama hostname to an IPv4 address; sets _OLLAMA_IP.
 # On macOS, dig/host bypass mDNSResponder and cannot see VPN
 # split-DNS entries.  Prefer dscacheutil and python3 socket
 # (both route through mDNSResponder / getaddrinfo) on macOS.
-_resolve_MACOS_OLLAMA_host() {
+_resolve_OLLAMA_host() {
     _rhost="$1"
     _rip=""
     case "$_rhost" in
         [0-9]*.[0-9]*.[0-9]*.[0-9]*)
-            _MACOS_OLLAMA_IP="$_rhost"
+            _OLLAMA_IP="$_rhost"
             return "$SUCCESS"
             ;;
     esac
@@ -380,54 +380,54 @@ _resolve_MACOS_OLLAMA_host() {
             "  -> Is your VPN connected?"
         return "$FAILURE"
     fi
-    _MACOS_OLLAMA_IP="$_rip"
+    _OLLAMA_IP="$_rip"
     print_info "Resolved $_rhost -> $_rip"
     return "$SUCCESS"
 }
 
 # parse the --ollama URL and resolve the hostname to an IP
-_validate_MACOS_OLLAMA_endpoint() {
-    if ! _parse_MACOS_OLLAMA_url "$OLLAMA_URL"; then
+_validate_OLLAMA_endpoint() {
+    if ! _parse_OLLAMA_url "$OLLAMA_URL"; then
         return "$FAILURE"
     fi
-    if ! _resolve_MACOS_OLLAMA_host "$_MACOS_OLLAMA_HOST"; then
+    if ! _resolve_OLLAMA_host "$_OLLAMA_HOST"; then
         return "$FAILURE"
     fi
     print_debug \
-        "Ollama: ${_MACOS_OLLAMA_HOST}:${_MACOS_OLLAMA_PORT}" \
-        "(${_MACOS_OLLAMA_IP})"
+        "Ollama: ${_OLLAMA_HOST}:${_OLLAMA_PORT}" \
+        "(${_OLLAMA_IP})"
     return "$SUCCESS"
 }
 
 # start the host-side ollama Unix socket proxy (Linux only)
-_start_MACOS_OLLAMA_proxy() {
+_start_OLLAMA_proxy() {
     _proxy_script="$ROOT_D/scripts/ollama-proxy.sh"
     if [ ! -f "$_proxy_script" ]; then
         print_error \
             "ollama-proxy.sh not found: $_proxy_script"
         return "$FAILURE"
     fi
-    rm -f "$_MACOS_OLLAMA_SOCK"
+    rm -f "$_OLLAMA_SOCK"
     sh "$_proxy_script" \
-        --host "$_MACOS_OLLAMA_HOST" \
-        --port "$_MACOS_OLLAMA_PORT" \
-        --socket "$_MACOS_OLLAMA_SOCK" &
-    _MACOS_OLLAMA_PROXY_PID=$!
-    print_debug "Ollama proxy PID: $_MACOS_OLLAMA_PROXY_PID"
+        --host "$_OLLAMA_HOST" \
+        --port "$_OLLAMA_PORT" \
+        --socket "$_OLLAMA_SOCK" &
+    _OLLAMA_PROXY_PID=$!
+    print_debug "Ollama proxy PID: $_OLLAMA_PROXY_PID"
     return "$SUCCESS"
 }
 
 # wait up to 10s for the proxy Unix socket file to appear
-_wait_MACOS_OLLAMA_proxy_ready() {
+_wait_OLLAMA_proxy_ready() {
     _elapsed=0
     _timeout=10
     while [ "$_elapsed" -lt "$_timeout" ]; do
-        if [ -S "$_MACOS_OLLAMA_SOCK" ]; then
+        if [ -S "$_OLLAMA_SOCK" ]; then
             print_info \
                 "Ollama proxy ready (${_elapsed}s)."
             return "$SUCCESS"
         fi
-        if ! kill -0 "$_MACOS_OLLAMA_PROXY_PID" \
+        if ! kill -0 "$_OLLAMA_PROXY_PID" \
             2>/dev/null; then
             print_error \
                 "Ollama proxy exited prematurely."
@@ -444,13 +444,13 @@ _wait_MACOS_OLLAMA_proxy_ready() {
 }
 
 # stop the host-side ollama proxy and remove the socket file
-_stop_MACOS_OLLAMA_proxy() {
-    if [ -n "$_MACOS_OLLAMA_PROXY_PID" ]; then
-        kill "$_MACOS_OLLAMA_PROXY_PID" 2>/dev/null || true
-        wait "$_MACOS_OLLAMA_PROXY_PID" 2>/dev/null || true
-        _MACOS_OLLAMA_PROXY_PID=""
+_stop_OLLAMA_proxy() {
+    if [ -n "$_OLLAMA_PROXY_PID" ]; then
+        kill "$_OLLAMA_PROXY_PID" 2>/dev/null || true
+        wait "$_OLLAMA_PROXY_PID" 2>/dev/null || true
+        _OLLAMA_PROXY_PID=""
     fi
-    rm -f "$_MACOS_OLLAMA_SOCK"
+    rm -f "$_OLLAMA_SOCK"
 }
 
 # _macos_route_to_cidr and _discover_vpn_routes moved to
@@ -459,7 +459,7 @@ _stop_MACOS_OLLAMA_proxy() {
 # write enforcer config file consumed by vpn-enforcer.sh daemon.
 # $1 = space-separated VPN CIDRs to block (may be empty).
 # $2 = fallback policy: "allow" (default) or "block".
-# When OLLAMA is configured (_MACOS_OLLAMA_IP set), appends OLLAMA vars.
+# When OLLAMA is configured (_OLLAMA_IP set), appends OLLAMA vars.
 _macos_write_enforcer_config() {
     _wec_routes="$1"
     _wec_fallback="${2:-allow}"
@@ -467,11 +467,11 @@ _macos_write_enforcer_config() {
         "$_wec_routes" > "$_MACOS_OLLAMA_ENFORCER_CONF"
     printf 'FALLBACK_POLICY=%s\n' \
         "$_wec_fallback" >> "$_MACOS_OLLAMA_ENFORCER_CONF"
-    if [ -n "$_MACOS_OLLAMA_IP" ]; then
+    if [ -n "$_OLLAMA_IP" ]; then
         printf 'OLLAMA_IP=%s\n' \
-            "$_MACOS_OLLAMA_IP" >> "$_MACOS_OLLAMA_ENFORCER_CONF"
+            "$_OLLAMA_IP" >> "$_MACOS_OLLAMA_ENFORCER_CONF"
         printf 'OLLAMA_PORT=%s\n' \
-            "$_MACOS_OLLAMA_PORT" >> "$_MACOS_OLLAMA_ENFORCER_CONF"
+            "$_OLLAMA_PORT" >> "$_MACOS_OLLAMA_ENFORCER_CONF"
     fi
     print_debug "Enforcer config: $_MACOS_OLLAMA_ENFORCER_CONF"
     return "$SUCCESS"
@@ -756,7 +756,7 @@ run() {
     fi
 
     if [ -n "$OLLAMA_URL" ]; then
-        if ! _validate_MACOS_OLLAMA_endpoint; then
+        if ! _validate_OLLAMA_endpoint; then
             return "$FAILURE"
         fi
     fi
@@ -847,11 +847,11 @@ run() {
         fi
     else
         if [ -n "$OLLAMA_URL" ]; then
-            if ! _start_MACOS_OLLAMA_proxy; then
+            if ! _start_OLLAMA_proxy; then
                 return "$FAILURE"
             fi
-            if ! _wait_MACOS_OLLAMA_proxy_ready; then
-                _stop_MACOS_OLLAMA_proxy
+            if ! _wait_OLLAMA_proxy_ready; then
+                _stop_OLLAMA_proxy
                 return "$FAILURE"
             fi
         fi
@@ -861,7 +861,7 @@ run() {
                 "Could not detect a non-VPN interface."
             print_error \
                 "Aborting to avoid unrestricted egress."
-            _stop_MACOS_OLLAMA_proxy
+            _stop_OLLAMA_proxy
             return "$FAILURE"
         fi
     fi
@@ -885,7 +885,7 @@ run() {
                     if ! podman exec -it "$CTN_NAME" bash; then
                         _ret="$FAILURE"
                     fi
-                    _stop_MACOS_OLLAMA_proxy
+                    _stop_OLLAMA_proxy
                     if [ "$(uname -s)" = "Darwin" ]; then
                         _macos_stop_enforcer
                         rm -f "$_MACOS_OLLAMA_ENFORCER_CONF"
@@ -898,7 +898,7 @@ run() {
                 if ! podman start -ai "$CTN_NAME"; then
                     _ret="$FAILURE"
                 fi
-                _stop_MACOS_OLLAMA_proxy
+                _stop_OLLAMA_proxy
                 if [ "$(uname -s)" = "Darwin" ]; then
                     _macos_stop_enforcer
                     rm -f "$_MACOS_OLLAMA_ENFORCER_CONF"
@@ -975,18 +975,20 @@ run() {
             # to override baseURL with a bare-IP URL (no scheme),
             # which cannot be parsed.
             # Provide a fully-qualified URL for opencode.
-            _ob="${_MACOS_OLLAMA_SCHEME}://${_MACOS_OLLAMA_HOST}:${_MACOS_OLLAMA_PORT}/v1"
+            _ob="${_OLLAMA_SCHEME}://${_OLLAMA_HOST}:${_OLLAMA_PORT}/v1"
             set -- "$@" \
                 --add-host \
-                    "${_MACOS_OLLAMA_HOST}:${_MACOS_OLLAMA_IP}" \
+                    "${_OLLAMA_HOST}:${_OLLAMA_IP}" \
                 --env \
-                    "OPENCODE_MACOS_OLLAMA_BASE_URL=${_ob}"
+                    "OPENCODE_OLLAMA_BASE_URL=${_ob}"
         else
             set -- "$@" \
                 --volume \
-                    "${_MACOS_OLLAMA_SOCK}:/tmp/ollama.sock:z" \
+                    "${_OLLAMA_SOCK}:/tmp/ollama.sock:z" \
                 --env \
                     "OLLAMA_PROXY_SOCK=/tmp/ollama.sock" \
+                --env \
+                    "OPENCODE_OLLAMA_BASE_URL=http://127.0.0.1:11434/v1" \
                 --env \
                     "OLLAMA_HOST=http://127.0.0.1:11434"
         fi
@@ -1000,7 +1002,7 @@ run() {
         print_error "Failed to start container ${CTN_NAME}."
         _ret="$FAILURE"
     fi
-    _stop_MACOS_OLLAMA_proxy
+    _stop_OLLAMA_proxy
     if [ "$(uname -s)" = "Darwin" ]; then
         _macos_stop_enforcer
         rm -f "$_MACOS_OLLAMA_ENFORCER_CONF"
