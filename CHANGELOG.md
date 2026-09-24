@@ -5,6 +5,7 @@
 ## [1.Y.Z] - 2026-MM-DD
 
 * Added
+  * verify_mount_dir takes a list of allowed path for mounting directories.
 * Changed
 * Fixed
 

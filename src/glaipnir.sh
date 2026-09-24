@@ -556,30 +556,59 @@ _podman_rm_img() {
 }
 
 ###
-# Verify that the directory exists and is a directory not set to HOME
+# Verify that the directory exists and is a allowed paths to not share
+# sensitives path
 # ARGUMENTS:
 #   1 - dir: Path to the dir to verify
 # RETURNS:
 #   SUCCESS, FAILURE if directory cannot be created or is not valid
 ###
 _verify_mount_point_d() {
-    _ret="$FAILURE"
+    _ret="$SUCCESS"
+    _path="$(realpath "$1" 2>/dev/null || echo "$1")"
+
     if [ -z "$1" ]; then
         print_warning "Mount point is not set."
-    elif [ "$1" = "${HOME}" ]; then
-        print_warning "Directory is set to the home directory, not recommended."
-    elif [ ! -e "$1" ]; then
-        print_debug "Mount point '$1' not found. Creating it..."
-        if mkdir -p "$1"; then
+        _ret="$FAILURE"
+    fi
+
+    if [ "${_ret}" != "${FAILURE}" ] && [ ! -d "${_path}" ]; then
+        print_warning "Mount point '${_path}' not a directory."
+        _ret="$FAILURE"
+    fi
+
+    if [ "${_ret}" != "${FAILURE}" ]; then
+        # TODO: Other list to allows ?
+        _restricted_dirs="${HOME}"
+        _allowed_paths="${_restricted_dirs} /tmp /var/tmp /opt"
+        _ret="${FAILURE}"
+       for _apath in ${_allowed_paths}; do
+           case "${_path}" in
+               "${_apath}"*) _ret="${SUCCESS}"; break ;;
+           esac
+       done
+       if [ "${_ret}" = "${FAILURE}" ]; then
+           print_warning "Mounting from ${_path} is forbidden"
+       else
+           for _rdir in ${_restricted_dirs}; do
+               if [ "${_path}" = "${_rdir}" ]; then
+                   print_warning "Mounting from ${_rdir} is forbidden"
+                   _ret="${FAILURE}"
+                   break
+               fi
+           done
+       fi
+    fi
+
+    if [ "${_ret}" != "${FAILURE}" ] && [ ! -e "${_path}" ]; then
+        print_debug "Mount point '${_path}' not found. Creating it..."
+        if mkdir -p "${_path}"; then
             _ret="$SUCCESS"
         else
             print_warning "Failed to create it"
         fi
-    elif [ ! -d "$1" ]; then
-        print_warning "Mount point '$1' not a directory."
-    else
-        _ret="$SUCCESS"
     fi
+ 
     return "$_ret"
 }
 
