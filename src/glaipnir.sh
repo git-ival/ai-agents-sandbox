@@ -70,6 +70,7 @@ CLEAN_IMG=0
 RESET_AGENT_CONF=0
 FORCE=0
 DNS_LIST=""
+RO_MOUNTS=""
 TOOLS_NEEDED="podman sed grep tar xargs"
 
 # useful vars
@@ -269,6 +270,13 @@ _parse_conf() {
                             REPOS)    REPOS="$REPOS $_item" ;;
                             AGENTS)
                                 _add_agent "$_item" || _pc_rc="${FAILURE}"
+                                ;;
+                            RO_MOUNTS)
+                                if [ -n "$RO_MOUNTS" ]; then
+                                    RO_MOUNTS="${RO_MOUNTS} ${_item}"
+                                else
+                                    RO_MOUNTS="${_item}"
+                                fi
                                 ;;
                         esac
                         ;;
@@ -752,7 +760,7 @@ _bind_agent_mounts() {
     _mount_d="${CACHE_D}/agents-mount"
     _verify_mount_point_d "$_mount_d" || {
         print_error "${_mount_d} is not a valid mount point."
-        return
+        return "$FAILURE"
     }
     _home="/home/aiuser"
     _mounts=""
@@ -836,6 +844,54 @@ _bind_agent_mounts() {
     printf '%s' "$_mounts"
 }
 
+###
+# Bind read-only mounts requested through --ro-mount / RO_MOUNTS.
+# Entries are 'src' or 'src:dst' defaults to
+# /home/aiuser/<basename(src)>.;
+# OUTPUTS:
+#   fd 3: log messages
+#   fd 1: list of --volume options to pass to podman, or empty if none
+# RETURNS:
+#   SUCCESS, FAILURE if a source is missing or destinations collide
+###
+_bind_ro_mounts() {
+    [ -n "$RO_MOUNTS" ] || return "$SUCCESS"
+    _brm_rc="$SUCCESS"
+    _brm_mounts=""
+    _brm_dsts="/home/${AI_USER_NAME} /tmp"
+
+    for _brm_entry in $RO_MOUNTS; do
+        _brm_src="$(printf '%s' "$_brm_entry" | cut -d ':' -f 1)"
+        _brm_dst="$(printf '%s' "$_brm_entry" | cut -d ':' -f 2)"
+        if [ "$_brm_dst" = "$_brm_entry" ]; then
+            _brm_dst="/home/${AI_USER_NAME}/$(basename "$_brm_src")"
+        else
+            _brm_dst="$(realpath "$_brm_dst" 2>/dev/null || echo "$_brm_dst")"
+        fi
+
+        if ! _verify_mount_point_d "$_brm_src"; then
+            print_warning \
+                "ro mount source '$_brm_src' is not a valid directory."
+            _brm_rc="$FAILURE"
+            continue
+        fi
+        case " $_brm_dsts " in
+            *" $_brm_dst "*)
+                print_error "ro mounts collide on destination '$_brm_dst'."
+                print_error \
+                    "Use 'src:dst' to give each mount a distinct destination."
+                _brm_rc="$FAILURE"
+                continue
+                ;;
+        esac
+        _brm_dsts="$_brm_dsts $_brm_dst"
+        _brm_mounts="$_brm_mounts --volume $_brm_src:$_brm_dst:ro,z"
+    done
+
+    printf '%s' "$_brm_mounts"
+    return "$_brm_rc"
+}
+
 # ================
 # Action functions
 # ----------------
@@ -878,6 +934,10 @@ Options:
                For 'run' action, Specify a custom workspace directory
                (default: ${SANDBOX_D_DEFAULT}) to mount in the sandbox at
                /home/aiuser/workspace.
+  --ro-mount <src>[:<dst>]
+               For 'run' action, bind-mount a host path read-only into the
+               sandbox. Can be set multiple times. Defaults 'dst' to
+               /home/aiuser/<basename(src)> when omitted.
   --full       Build fully the container image instead of refering to the one
                from registry ${DEFAULT_IMG_REPO}
   --all, -a    For 'clean' action, Remove all containers and images
@@ -910,6 +970,11 @@ Notes:
     PACKAGES=(
         <package1>
         <package2>
+        ...
+    )
+    READONLY_MOUNTS=(
+        <src1>
+        <src2>:<dst2>
         ...
     )
     2. Create hooks to customize the image build. Gives the path to a script or
@@ -1072,7 +1137,8 @@ run() {
             _reset_agent_mounts || return "$FAILURE"
         fi
     fi
-    _agent_mounts="$(_bind_agent_mounts)"
+    _agent_mounts="$(_bind_agent_mounts)" || return "$FAILURE"
+    _ro_mounts="$(_bind_ro_mounts)" || return "$FAILURE"
 
     # Resume a stopped container
     if [ -n "$_ctn_state" ]; then
@@ -1167,6 +1233,7 @@ run() {
     set -- "$@" \
         --name "$CTN_NAME" \
         "${_agent_mounts}" \
+        "${_ro_mounts}" \
         --volume "${_hooks_mount_d}:/usr/local/bin/${SANDBOX_ID}-run-hooks/:z" \
         --volume "${SANDBOX_D}:${AI_USER_WORKSPACE}:z" \
         --tmpfs "/tmp:rw,nosuid,nodev,noexec,size=1g" \
@@ -1534,6 +1601,18 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             SANDBOX_D="$2"
+            shift 2
+            ;;
+        --ro-mount)
+            if [ -z "$2" ]; then
+                print_error "Error: $1 requires an argument."
+                exit 1
+            fi
+            if [ -n "$RO_MOUNTS" ]; then
+                RO_MOUNTS="${RO_MOUNTS} $2"
+            else
+                RO_MOUNTS="$2"
+            fi
             shift 2
             ;;
         --data-dir)
