@@ -6,6 +6,7 @@
 
 * Added
 * Changed
+  * README installation guide
 * Fixed
 
 ## [1.1.0] - 2026-10-02
