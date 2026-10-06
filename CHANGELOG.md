@@ -7,6 +7,7 @@
 * Added
 * Changed
   * README installation guide
+  * Print only the version when asked
 * Fixed
 
 ## [1.1.0] - 2026-10-02
