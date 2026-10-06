@@ -9,6 +9,7 @@
   * README installation guide
   * Print only the version when asked
 * Fixed
+  * mount_point: Store the realpth in verify functions.
 
 ## [1.1.0] - 2026-10-02
 
