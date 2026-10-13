@@ -14,6 +14,7 @@ coding agents in an isolated sandbox with **Glaipnir**.
 - [5. Mount an additional directory into the environment](#5-mount-an-additional-directory-into-the-environment)
 - [6. Inspect what has been built and is running](#6-inspect-what-has-been-built-and-is-running)
 - [7. Clean up containers, images, and cache](#7-clean-up-containers-images-and-cache)
+- [8. Safely Running Host Commands from the Sandbox](#8-safely-running-host-commands-from-the-sandbox)
 - [Additional Operations](#additional-operations)
   - [Reusing and Resetting Host Agent Authentication](#reusing-and-resetting-host-agent-authentication)
   - [Backup and Restore Agent Data](#backup-and-restore-agent-data)
@@ -307,6 +308,71 @@ glaipnir clean -a
   ```bash
   glaipnir clean-data
   ```
+
+---
+
+## 8. Safely Running Host Commands from the Sandbox
+
+Sometimes, your AI coding assistant needs to use tools already configured on
+your computer (such as `git` to check branch status, or `osc` to build packages)
+without putting your computer at risk.
+
+Glaipnir allows you to securely share specific commands with the sandbox while
+keeping your system safe.
+
+### How to Use It
+
+You decide exactly which commands the sandbox is allowed to run.
+
+#### Method 1: Using the Command Line (`--cmd`)
+
+Pass the `--cmd` flag when launching your agent:
+
+```bash
+# Allow only the safe "git status" command:
+glaipnir run claude --cmd "git status"
+
+# Allow multiple specific commands:
+glaipnir run claude --cmd "git status" --cmd "git diff" --cmd "osc status"
+
+# Allow all git commands:
+glaipnir run claude --cmd "git"
+```
+
+#### Method 2: In your `.glaipnir.conf` Configuration File
+
+For regular projects, add the commands to your project's `.glaipnir.conf` file:
+
+```conf
+Single command
+CMD="git status"
+
+Or a list of allowed commands
+CMDS=(
+    "git status"
+    "git diff"
+    "osc"
+)
+```
+
+### Why is this 100% Safe?
+
+You might wonder: *Does this mean the AI can take over my computer?* **No.**
+Glaipnir uses several protective barriers:
+
+* **Strict Whitelist (Zero Trust):** The AI can **never** run arbitrary
+  commands. If you only permit `git status`, any attempt to run `git push`,
+  `rm`, or any other command is blocked instantly.
+* **Locked to your Project Folder:** Even for approved commands, the tool is
+  strictly restricted to your current workspace directory. It can never read,
+  modify, or reach outside files (like your personal documents, SSH keys, or
+  photos).
+* **Single-Use Security Token:** Every time you start Glaipnir, a random
+  cryptographic key is created for that session only. As soon as you exit, the
+  communication bridge is permanently destroyed.
+* **Your Passwords and Keys Stay Safe:** Your personal credentials (tokens,
+  private keys, API secrets) are never sent into the sandbox. The tool runs on
+  your machine on behalf of the sandbox under strict guard rails.
 
 ---
 

@@ -44,6 +44,15 @@ SANDBOX_D="${PWD}"
 BUILD_HOOK_ARG=""
 RUN_HOOK_ARG=""
 
+# Proxy variables
+PROXY_D="${DATA_D}/proxy"
+PROXY_WRAPPER_P="${PROXY_D}/proxy-wrapper.sh"
+PROXY_BIN_P="${PROXY_D}/proxy-bin.sh"
+PROXY_RUN_D=""
+PROXY_PID=""
+PROXY_PORT=""
+PROXY_TOKEN=""
+
 # Container variables
 DEFAULT_IMG_REPO="registry.opensuse.org/home/vlefebvre/container-images/containers/opensuse"
 IMG_NAME="${SANDBOX_ID}"
@@ -58,6 +67,7 @@ AI_USER_GID=1000
 AI_USER_WORKSPACE="/home/${AI_USER_NAME}/workspace"
 PKGS=""
 REPOS=""
+PROXY_CMDS=""
 
 # argument variables
 AGENT=""
@@ -233,6 +243,33 @@ _add_agent() {
 }
 
 ###
+# Add a command to the list PROXY_CMDS to run through the proxy
+# ARGUMENTS:
+#   1 - cmd: command to add
+# GLOBALS:
+#   PROXY_CMDS: updated with the new command
+# RETURNS:
+#   SUCCESS, FAILURE if not valid command
+###
+_add_proxy_cmd() {
+    _apc_rc="${SUCCESS}"
+    _cmd="$1"
+    if [ -z "$_cmd" ]; then
+        print_error "Proxy command cannot be empty."
+        _apc_rc="${FAILURE}"
+    else
+        _cmd="$(printf "%s" "$_cmd" | tr ' ' '+')"
+        if [ "${PROXY_CMDS}" = "" ]; then
+            PROXY_CMDS="$_cmd"
+        else
+            PROXY_CMDS="$_cmd $PROXY_CMDS"
+            PROXY_CMDS="$( printf "%s" "${PROXY_CMDS}" | xargs -n1 |  sort -u | xargs)"
+        fi 
+    fi
+    return "${_apc_rc}"
+}
+
+###
 # parse configuration file if it exists
 # RETURNS:
 #   SUCCESS, FAILURE if conf not valid
@@ -279,6 +316,9 @@ _parse_conf() {
                                     RO_MOUNTS="${_item}"
                                 fi
                                 ;;
+                            CMDS)
+                                _add_proxy_cmd "$_item" || _pc_rc="${FAILURE}"
+                                ;;
                         esac
                         ;;
                 esac
@@ -303,6 +343,8 @@ _parse_conf() {
                             DATA_DIR|DATA_D)    HOME_DATA_D="$_value" ;;
                             IMG_TAG)            IMG_TAG="$_value" ;;
                             DNS)                DNS_LIST="$_value $DNS_LIST" ;;
+                            CMD)                _add_proxy_cmd "$_value" ||\
+                                                    _pc_rc="${FAILURE}" ;;
                         esac
                 esac
             fi
@@ -904,6 +946,98 @@ _bind_ro_mounts() {
     return "$_brm_rc"
 }
 
+###
+# Stop the proxy listener if it is running, and clean up its temporary files.
+# GLOBALS:
+#   PROXY_PID: PID of the proxy listener process
+#   PROXY_RUN_D: Temporary directory for the proxy listener
+# OUTPUTS:
+#   fd 3: log messages
+###
+_stop_proxy_listener() {
+    if [ -n "$PROXY_PID" ] && kill -0 "$PROXY_PID" 2>/dev/null; then
+        print_debug "Stopping host proxy listener (PID: $PROXY_PID)..."
+        kill "$PROXY_PID" 2>/dev/null || true
+        wait "$PROXY_PID" 2>/dev/null || true
+        PROXY_PID=""
+    fi
+    [ -n "$PROXY_RUN_D" ] && rm -rf "$PROXY_RUN_D"
+}
+
+###
+# Start proxy listener commands in the background, if any are defined.
+# GLOBALS:
+#   PROXY_CMDS: List of commands to run in the background
+# OUTPUTS:
+#   fd 3: log messages
+# RETURNS:
+#   SUCCESS, FAILURE if a command fails to start
+###
+_start_proxy_listener() {
+    _spl_rc="${SUCCESS}"
+    if ! command -v socat >/dev/null 2>&1; then
+        print_warning "socat not found, proxy listener commands will not run."
+        _spl_rc="${FAILURE}"
+    elif [ -n "${PROXY_CMDS}" ]; then
+        while true; do
+            _rand=$(od -An -N2 -tu2 /dev/urandom | tr -d ' ')
+            PROXY_PORT=$(( 1024 + _rand % 64512 ))
+            if command -v ss >/dev/null 2>&1; then
+                ss -lntu | grep -qw ":${PROXY_PORT}" || break
+            elif command -v lsof >/dev/null 2>&1; then
+                lsof -iTCP:"${PROXY_PORT}" -sTCP:LISTEN >/dev/null 2>&1 || break
+            else
+                break
+            fi
+        done
+        print_debug "Selected random proxy port: ${PROXY_PORT}"
+
+        if command -v openssl >/dev/null 2>&1; then
+            PROXY_TOKEN="$(openssl rand -hex 16)"
+        else
+            PROXY_TOKEN="$(head -c 16 /dev/urandom | xxd -p)"
+        fi
+
+        PROXY_RUN_D="${CACHE_D}/run/${CTN_NAME}"
+        mkdir -p "${PROXY_RUN_D}/bin"
+        chmod 700 "${PROXY_RUN_D}"
+        chmod 755 "${PROXY_RUN_D}/bin"
+
+        _allow_list_f="${PROXY_RUN_D}/allowed_commands.list"
+        if [ ! -f "${_allow_list_f}" ]; then
+            touch "${_allow_list_f}"
+            {
+                printf "git rev-parse\n"
+                printf "git describe\n"
+            } > "${_allow_list_f}"
+        fi
+        chmod 600 "${_allow_list_f}"
+
+        for _cmd in ${PROXY_CMDS}; do
+            _cmd="$(printf "%s" "${_cmd}" | tr "+" " ")"
+            printf "%s\n" "${_cmd}" >> "${_allow_list_f}"
+
+            _bin="$(printf "%s" "${_cmd}" | cut -d ' ' -f 1)"
+            _proxy_bin_f="${PROXY_RUN_D}/bin/${_bin}"
+            if [ ! -f "${_proxy_bin_f}" ]; then
+                cp "${PROXY_BIN_P}" "${_proxy_bin_f}"
+                chmod 755 "${_proxy_bin_f}"
+            fi
+        done
+
+        export GLAIPNIR_PROXY_TOKEN="${PROXY_TOKEN}"
+        export GLAIPNIR_HOST_WORKSPACE="${SANDBOX_D}"
+        export GLAIPNIR_PROXY_ALLOWLIST="${_allow_list_f}"
+
+        print_info "Starting host proxy listener on 127.0.0.1:${PROXY_PORT}..."
+        socat -d0 "TCP-LISTEN:${PROXY_PORT},bind=127.0.0.1,reuseaddr,fork" \
+            "EXEC:${PROXY_WRAPPER_P}" 2>"${PROXY_RUN_D}/socat.log" &
+        PROXY_PID=$!
+        trap '_stop_proxy_listener' EXIT INT TERM HUP
+    fi
+    return "${_spl_rc}"
+}
+
 # ================
 # Action functions
 # ----------------
@@ -1125,8 +1259,12 @@ run() {
         return "$FAILURE"
     fi
 
-    _network_arg="--network pasta"
-    _dns_args=""
+    if [ -n "${PROXY_CMDS}" ]; then
+        print_debug "Starting proxy listener for commands: ${PROXY_CMDS}"
+        _start_proxy_listener || return "$FAILURE"
+    fi
+
+    _pasta_opts=""
     if [ "${VPN_PROTECTION}" = "0" ]; then
         print_warning "VPN leak protection is disabled."
         print_warning "    -> The sandbox will have unrestricted egress."
@@ -1147,14 +1285,24 @@ run() {
             return "$FAILURE"
         else
             print_info "Binding outbound to interface: ${_iface}"
-            _network_arg="--network \"pasta:--outbound-if4,${_iface}\""
-            [ "$DNS_LIST" = "" ] && DNS_LIST="1.1.1.1 8.8.8.8"
-            for _dns in $DNS_LIST; do
-                _dns_args="$_dns_args --dns \"$_dns\""
-            done
+            _pasta_opts="--outbound-if4,${_iface}"
+            
         fi
-        [ "$DNS_LIST" = "" ] && DNS_LIST="1.1.1.1 8.8.8.8"
     fi
+
+    if [ -n "${PROXY_PORT}" ]; then
+        _pasta_opts="${_pasta_opts:+${_pasta_opts},}-T,${PROXY_PORT}"
+    fi
+
+    _network_arg=""
+    if [ -n "${_pasta_opts}" ]; then
+        _network_arg="--network \"pasta:${_pasta_opts}\""
+    else
+        _network_arg="--network pasta"
+    fi
+
+    _dns_args=""
+    [ "$DNS_LIST" = "" ] && DNS_LIST="1.1.1.1 8.8.8.8"
     for _dns in $DNS_LIST; do
         _dns_args="$_dns_args --dns \"$_dns\""
     done
@@ -1312,6 +1460,17 @@ run() {
         set -- "$@" --annotation krun.ram_mib=8192 --annotation krun.cpus=4
     fi
 
+    if [ -n "${PROXY_CMDS}" ]; then
+        for _bin_p in "${PROXY_RUN_D}"/bin/*; do
+            _bin="$(basename "$_bin_p")"
+            set -- "$@" --volume "${_bin_p}:/usr/local/bin/${_bin}:ro,z"
+        done
+         set -- "$@" \
+            --env "GLAIPNIR_PROXY_PORT=${PROXY_PORT}" \
+            --env "GLAIPNIR_PROXY_TOKEN=${PROXY_TOKEN}" \
+            --env "GLAIPNIR_PROXY_HOST=127.0.0.1"
+    fi
+
     _args=$*
     print_info "Starting isolated container..."
     _cmd="${_podman_cmd} run -it $_args ${IMG_NAME}:latest"
@@ -1323,6 +1482,9 @@ run() {
     [ "$(uname -s)" = "Darwin" ] \
         && [ "${VPN_PROTECTION}" -eq 1 ] \
         && _macos_run_teardown
+
+    [ -n "${PROXY_CMDS}" ] && _stop_proxy_listener
+
     return "$_ret"
 }
 
@@ -1650,6 +1812,15 @@ while [ $# -gt 0 ]; do
             HOME_DATA_D="$2"
             shift 2
             ;;
+        --cmd)
+            if [ -z "$2" ]; then
+                print_error "Error: $1 requires an argument."
+                exit 1
+            else
+                _add_proxy_cmd "$2" || exit 1
+            fi
+            shift 2
+            ;;
         --force)                 FORCE=1;                   shift 1 ;;
         -*)
             print_error "Unknown option: $1"
@@ -1663,6 +1834,13 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+if [ -n "${PROXY_CMDS}" ]; then
+    TOOLS_NEEDED="${TOOLS_NEEDED} socat"
+    for _cmd in $PROXY_CMDS; do
+        _bin="$(printf "%s" "$_cmd" | tr '+' ' ' | cut -d ' ' -f 1)"
+        TOOLS_NEEDED="${TOOLS_NEEDED} ${_bin}"
+    done
+fi
 _check_tools_needed || {
     print_error "Please install the missing tools and try again. Aborting."
     exit "${FAILURE}"

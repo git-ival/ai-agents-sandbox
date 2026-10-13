@@ -75,6 +75,7 @@ RUN zypper --non-interactive refresh && \
         sindrai-skills-cve-investigation \
         sindrai-skills-packaging-patches \
         sindrai-skills-shell-scripting \
+        socat \
         tar \
         toilet \
         unzip \
@@ -203,7 +204,6 @@ USER $AI_USER
 ENV HOME=/home/aiuser \
     HOSTNAME=ai-sandbox \
     CONTAINER_ID=ai-sandbox \
-    PATH=/usr/local/bin:/usr/bin:/bin \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     GH_CONFIG_DIR=/home/aiuser/.config/gh \

@@ -5,6 +5,7 @@
 ## [1.Y.Z] - 2026-MM-DD
 
 * Added
+  * proxy commands.
 * Changed
   * README installation guide
   * Print only the version when asked
