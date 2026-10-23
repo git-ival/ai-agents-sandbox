@@ -36,6 +36,8 @@ ${SRC_D}/glaipnir.sh
 ${SRC_D}/printer.sh
 ${SRC_D}/macos-sandbox.sh
 ${SRC_D}/macos-network-policy.sh
+${ROOT_D}/proxy/proxy-bin.sh
+${ROOT_D}/proxy/proxy-wrapper.sh
 "
 
 BUILD_D="${ROOT_D}/build"
@@ -213,6 +215,7 @@ build_main() {
 
         echo "Building data ${BUILD_D}${PKGDATADIR}/ ..."
         cp -r image "${BUILD_D}${PKGDATADIR}/image"
+        cp -r proxy "${BUILD_D}${PKGDATADIR}/proxy"
         if [ "${MACOS_BUILD}" = "1" ]; then
             mkdir -p "${BUILD_D}${PKGDATADIR}/src/launchd" || {
                 echo "build: Failed to create macOS enforcer asset dirs"

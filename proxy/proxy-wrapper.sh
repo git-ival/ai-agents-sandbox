@@ -3,26 +3,36 @@
 # Glaipnir - Generic Host Proxy Wrapper
 # =============================================================================
 set -euo pipefail
+exec 2>&1
 
 IFS= read -r -d '' RECEIVED_TOKEN || true
 EXPECTED_TOKEN="${GLAIPNIR_PROXY_TOKEN:-}"
 
 if [ -z "$EXPECTED_TOKEN" ] || [ "$RECEIVED_TOKEN" != "$EXPECTED_TOKEN" ]; then
-    echo "Glaipnir Security Error: Unauthorized proxy access." >&2
+    echo "Glaipnir Security Error: Unauthorized proxy access."
+    printf "__GLAIPNIR_RC_%s__:1\n" "$RECEIVED_TOKEN"
     exit 1
 fi
 
 IFS= read -r -d '' CTN_WORKSPACE_BASE || true
 IFS= read -r -d '' CTN_CWD || true
 IFS= read -r -d '' TOOL_NAME || true
+IFS= read -r -d '' ARG_COUNT || true
 
 cmd=()
-while IFS= read -r -d '' arg; do
+if ! [[ "$ARG_COUNT" =~ ^[0-9]+$ ]]; then
+    echo "Glaipnir Proxy Error: Invalid argument count."
+    printf "__GLAIPNIR_RC_%s__:1\n" "$RECEIVED_TOKEN"
+    exit 1
+fi
+for ((i=0; i<ARG_COUNT; i++)); do
+    IFS= read -r -d '' arg || true
     cmd+=("$arg")
 done
 
 if [ -z "$TOOL_NAME" ]; then
-    echo "Glaipnir Proxy Error: Missing tool name." >&2
+    echo "Glaipnir Proxy Error: Missing tool name."
+    printf "__GLAIPNIR_RC_%s__:1\n" "$RECEIVED_TOKEN"
     exit 1
 fi
 
@@ -41,7 +51,8 @@ if [ -f "$ALLOWLIST_FILE" ]; then
         [[ "$allowed_entry" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${allowed_entry// }" ]] && continue
 
-        if [[ "$REQUESTED_CMD" == "$allowed_entry" || "$REQUESTED_CMD" == "$allowed_entry "* ]]; then
+        if [[ "$REQUESTED_CMD" == "$allowed_entry" ||
+              "$REQUESTED_CMD" == "$allowed_entry "* ]]; then
             IS_ALLOWED=1
             break
         fi
@@ -50,7 +61,7 @@ fi
 
 if [ "$IS_ALLOWED" -ne 1 ]; then
     echo "Glaipnir Security Error: Command '$REQUESTED_CMD' is not whitelisted."
-    printf "\n__GLAIPNIR_RC_%s__:1\n" "$RECEIVED_TOKEN"
+    printf "__GLAIPNIR_RC_%s__:1\n" "$RECEIVED_TOKEN"
     exit 1
 fi
 
@@ -64,31 +75,38 @@ else
     TARGET_DIR="${HOST_WORKSPACE}"
 fi
 
-REAL_TARGET="$(realpath -m "$TARGET_DIR" 2>/dev/null || echo "$TARGET_DIR")"
+REAL_TARGET="$(realpath -m "$TARGET_DIR" 2>/dev/null ||
+    echo "$TARGET_DIR")"
 REAL_BASE="$(realpath "$HOST_WORKSPACE")"
 
-if [[ "$REAL_TARGET" != "$REAL_BASE" && "$REAL_TARGET" != "$REAL_BASE"/* ]]; then
-    echo "Glaipnir Security Error: Execution outside of workspace is blocked." >&2
-    echo "Requested: $REAL_TARGET | Base: $REAL_BASE" >&2
+if [[ "$REAL_TARGET" != "$REAL_BASE" &&
+      "$REAL_TARGET" != "$REAL_BASE"/* ]]; then
+    echo "Glaipnir Security Error: Execution outside of workspace" \
+        "is blocked."
+    echo "Requested: $REAL_TARGET | Base: $REAL_BASE"
+    printf "__GLAIPNIR_RC_%s__:1\n" "$RECEIVED_TOKEN"
     exit 1
 fi
 
 if [ ! -d "$REAL_TARGET" ]; then
-    echo "Glaipnir Error: Directory '$REAL_TARGET' does not exist on host." >&2
+    echo "Glaipnir Error: Directory '$REAL_TARGET' does not exist on host."
+    printf "__GLAIPNIR_RC_%s__:1\n" "$RECEIVED_TOKEN"
     exit 1
 fi
 
 cd "$REAL_TARGET"
 
-REAL_BIN="$(command -v "$TOOL_NAME" 2>/dev/null || true)"
+REAL_BIN="$(type -P "$TOOL_NAME" 2>/dev/null || true)"
 if [ -z "$REAL_BIN" ] || [ ! -x "$REAL_BIN" ]; then
-    echo "Glaipnir Error: Binary '$TOOL_NAME' not found or not executable on host." >&2
+    echo "Glaipnir Error: Binary '$TOOL_NAME' not found or not" \
+        "executable on host."
+    printf "__GLAIPNIR_RC_%s__:1\n" "$RECEIVED_TOKEN"
     exit 1
 fi
 
 set +e
-"$REAL_BIN" "${cmd[@]}"
+"$REAL_BIN" "${cmd[@]}" </dev/null
 CMD_RC=$?
 
-printf "\n__GLAIPNIR_RC_%s__:%d\n" "$RECEIVED_TOKEN" "$CMD_RC"
+printf "__GLAIPNIR_RC_%s__:%d\n" "$RECEIVED_TOKEN" "$CMD_RC"
 exit "$CMD_RC"
