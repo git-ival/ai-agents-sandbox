@@ -234,7 +234,6 @@ _add_agent() {
         if [ "${AGENT}" = "" ]; then
             AGENT="$_agt"
         else
-            BUILD_FULL=1
             AGENT="$_agt $AGENT"
             AGENT="$( printf "%s" "${AGENT}" | xargs -n1 |  sort -u | xargs)"
         fi 
@@ -1170,11 +1169,16 @@ build() {
         done
     }
 
+    _container_f="${_build_d}/Containerfile"
     if [ $BUILD_FULL -eq 1 ]; then
-        _container_f="${_build_d}/Containerfile"
+        _target_stage="from-scratch"
     else
-        _container_f="${_build_d}/Containerfile.agent"
-        sed -i "s|%%AGENT%%|$AGENT|g" "${_container_f}"
+        _agent_count="$(printf "%s\n" "${AGENT}" | wc -w)"
+        if [ "$_agent_count" -eq 1 ]; then
+            _target_stage="${DEFAULT_IMG_REPO}/${SANDBOX_ID}-${AGENT}:latest"
+        else
+            _target_stage="${DEFAULT_IMG_REPO}/${SANDBOX_ID}-base:latest"
+        fi
     fi
     print_info "Building container image ${IMG_NAME}:${IMG_TAG} ..."
     # Store every image previously built, whatever its version tag
@@ -1183,7 +1187,8 @@ build() {
     [ ${DEBUG} -eq 1 ] && set -- --log-level=debug
     set -- "$@" build --no-cache --rm \
         --pull=always \
-        --build-arg "AGENT=\"${AGENT}\"" \
+        --build-arg "TARGET_STAGE=${_target_stage}" \
+        --build-arg "BUILD_AGENTS=\"${AGENT}\"" \
         --build-arg "IMG_TAG=${IMG_TAG}" \
         --build-arg "PKGS=\"${PKGS}\"" \
         --build-arg "REPOS=\"${REPOS}\"" \
@@ -1876,9 +1881,6 @@ if [ "$AGENT" != "" ]; then
     IMG_NAME="${IMG_NAME}-${_agents}"
     CTN_NAME="${CTN_NAME}-${_agents}"
 else
-    # IF build is invoked, it should act like full argument.
-    # Todo: Create the all image to export the full build for all agents
-    BUILD_FULL=1
     AGENT="$TRUSTED_AGENTS"
 fi
 

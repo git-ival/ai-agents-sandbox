@@ -75,8 +75,8 @@ ai-agents-sandbox/
 * **`src/*.sh`**: Shell libraries sourced by the main script (e.g., `printer.sh`
   for colored status messages and terminal banners, and macOS
   sandboxing/networking helpers).
-* **`image/`**: Container image assets, including root `Containerfile`, slim
-  `Containerfile.agent`, runtime entrypoint scripts, default configurations, and
+* **`image/`**: Container image assets, including multi-stage
+  `Containerfile`, runtime entrypoint scripts, default configurations, and
   per-agent profiles and skills.
 * **`docs/`**: Detailed project documentation, including the
   [Usage Guide](docs/usage.md),

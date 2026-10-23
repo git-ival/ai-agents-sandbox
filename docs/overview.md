@@ -34,8 +34,7 @@ measures.
 ai-agents-sandbox/
 │
 ├── image/
-│   ├── Containerfile          # Full image definition — no secrets; used with `--full`
-│   ├── Containerfile.agent    # Slim per-agent image layered on the registry base (default build)
+│   ├── Containerfile          # Multi-stage definition: `from-scratch` base + `final` stage
 │   ├── agents/
 │   │   ├── claude/            # Claude sub-agent definitions (provisioned to ~/.claude/agents/)
 │   │   ├── copilot/           # Copilot agent definitions (provisioned to ~/.copilot/agents/)
@@ -299,9 +298,9 @@ and used automatically, so building is optional:
   (`ai-agents-sandbox[-<agent>]`) and starts it. A locally built image always
   takes precedence.
 - **`build`** — by default layers your customisations (packages, build hooks)
-  on top of the registry base via `Containerfile.agent`, producing a slim
-  image quickly. Pass **`--full`** to build the entire image from
-  `Containerfile` instead of pulling the base.
+  on top of the registry base (`final` stage of `Containerfile`), producing a
+  slim image quickly. Pass **`--full`** to build from the `from-scratch` stage
+  instead of pulling the base.
 
 This means the typical first run needs **no build step at all**.
 

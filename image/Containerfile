@@ -1,105 +1,103 @@
-# =============================================================================
-#  AI Agents Sandbox — GitHub Copilot + Gemini CLI + Claude Code
-#  Base : openSUSE Tumbleweed — rootless, no embedded credentials
-#  Auth : runtime only, persisted via home volume
-# =============================================================================
+# =====================================================
+#  AI Agents Sandbox — Unique Containerfile Multi-stage
+# =====================================================
 
-FROM registry.opensuse.org/opensuse/tumbleweed:latest
+# ================
+# Global arguments
+# ----------------
+ARG BASE_IMAGE="registry.opensuse.org/home/vlefebvre/container-images/containers/opensuse/ai-agents-sandbox-base:latest"
+ARG TARGET_STAGE="${BASE_IMAGE}"
 
-ARG AGENT="copilot gemini claude opencode antigravity hermes-agent"
-ARG IMG_TAG="0.0.0"
+# ============================================
+# "From scratch" stage to build the base image
+# --------------------------------------------
+FROM registry.opensuse.org/opensuse/tumbleweed:latest AS from-scratch
+
 ARG AI_USER=aiuser
 ARG AI_UID=1000
 ARG AI_GID=1000
+
+USER root
+
+# Repositories
+RUN zypper --non-interactive addrepo \
+        https://download.opensuse.org/repositories/home:/vlefebvre/openSUSE_Tumbleweed/ \
+        home_vlefebvre && \
+    zypper --non-interactive addrepo \
+        https://download.opensuse.org/repositories/home:/val4oss/openSUSE_Tumbleweed/ \
+        home_val4oss && \
+    zypper --non-interactive --gpg-auto-import-keys refresh
+
+# System Package
+RUN zypper --non-interactive update && \
+    zypper --non-interactive install --no-recommends \
+        bash ca-certificates coreutils curl customize-ps1 diffutils figlet file \
+        findutils gawk grep git gzip iproute2 iputils jq less nodejs npm patch \
+        procps python3 python3-pip sed shadow ShellCheck sindrai \
+        sindrai-skills-go-cve-investigation sindrai-skills-packaging \
+        sindrai-skills-shell-scripting socat tar toilet unzip util-linux \
+        vim-small wget which xclip && \
+    zypper clean --all && \
+    rm -rf /var/cache/zypp/* /tmp/* /var/tmp/*
+
+# Create non-root user
+RUN groupadd --gid $AI_GID $AI_USER && \
+    useradd \
+      --uid $AI_UID \
+      --gid $AI_GID \
+      --home-dir /home/$AI_USER \
+      --shell /bin/bash \
+      --create-home \
+      $AI_USER
+
+# Scripts for init and skel setup
+COPY --chmod=755 scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chown=$AI_UID:$AI_GID --chmod=744 \
+    agents /usr/share/ai-agents-sandbox/agents
+COPY --chown=$AI_UID:$AI_GID --chmod=744 \
+    skel   /usr/share/ai-agents-sandbox/skel
+
+
+# ==========================================================
+# Final stage to build customized image with selected agents
+# ----------------------------------------------------------
+FROM ${TARGET_STAGE} AS final
+
+ARG BUILD_AGENTS="copilot gemini claude opencode antigravity hermes-agent"
+ARG IMG_TAG="0.0.0"
+ARG AI_USER=aiuser
 ARG REPOS=""
 ARG PKGS=""
 ARG HOOKS_BUILD="hooks/build"
 
 LABEL maintainer="val4oss" \
-      description="AI Agents sandbox - ${AGENT}, rootless" \
+      description="AI Agents sandbox - ${BUILD_AGENTS}, rootless" \
       version="${IMG_TAG}" \
       security.caps="none" \
       security.network="pasta" \
       security.credentials="runtime-only"
 
-# ===================
-# System Repositories
-# -------------------
+USER root
+
+# Optional Repositories
 RUN if [ -n "$REPOS" ]; then \
         for _repo in ${REPOS}; do \
             zypper --non-interactive ar "${_repo}"; \
-        done && \
-        zypper --non-interactive --gpg-auto-import-keys refresh; \
+        done; \
+    fi
+RUN zypper --non-interactive --gpg-auto-import-keys refresh
+
+# Optional System Packages
+RUN if [ -n "$PKGS" ]; then \
+        zypper --non-interactive refresh && \
+        zypper --non-interactive update && \
+        zypper --non-interactive install --no-recommends ${PKGS} && \
+        zypper clean --all && \
+        rm -rf /var/cache/zypp/* /tmp/* /var/tmp/*; \
     fi
 
-# ===============
-# sindrai project (home:vlefebvre repo)
-# ---------------
-RUN zypper --non-interactive addrepo \
-        https://download.opensuse.org/repositories/home:/vlefebvre/openSUSE_Tumbleweed/ \
-        home:vlefebvre && \
-    zypper --non-interactive --gpg-auto-import-keys refresh home:vlefebvre
-
-# ==============
-# System Package
-# --------------
-RUN zypper --non-interactive refresh && \
-    zypper --non-interactive update && \
-    zypper --non-interactive install --no-recommends \
-        bash \
-        ca-certificates \
-        coreutils \
-        curl \
-        diffutils \
-        figlet \
-        file \
-        findutils \
-        gawk \
-        grep \
-        git \
-        gzip \
-        iproute2 \
-        iputils \
-        jq \
-        less \
-        nodejs \
-        npm \
-        patch \
-        procps \
-        python3 \
-        python3-pip \
-        sed \
-        shadow \
-        ShellCheck \
-        sindrai \
-        sindrai-skills-cve-investigation \
-        sindrai-skills-packaging-patches \
-        sindrai-skills-shell-scripting \
-        socat \
-        tar \
-        toilet \
-        unzip \
-        util-linux \
-        vim-small \
-        wget \
-        which \
-        xclip \
-        ${PKGS} && \
-    zypper clean --all && \
-    rm -rf /var/cache/zypp/* /tmp/* /var/tmp/*
-
-RUN zypper --non-interactive addrepo \
-        https://download.opensuse.org/repositories/home:/val4oss/openSUSE_Tumbleweed/ \
-        home:val4oss && \
-    zypper --non-interactive --gpg-auto-import-keys refresh home:val4oss && \
-    zypper --non-interactive install --no-recommends customize-ps1 && \
-    zypper clean --all && \
-    rm -rf /var/cache/zypp/*
-
-# ===============
-# GitHub CLI (gh) - installed when AGENT contains copilot
-# ---------------
-RUN case " $AGENT " in \
+# GitHub CLI (gh) - installed when BUILD_AGENTS contains copilot
+RUN case " $BUILD_AGENTS " in \
     *\ copilot\ *) \
         zypper --non-interactive addrepo \
             https://cli.github.com/packages/rpm/gh-cli.repo && \
@@ -110,10 +108,8 @@ RUN case " $AGENT " in \
     ;; \
     esac
 
-# ================
-# Google Cloud SDK - installed when AGENT contains claude or opencode
-# ----------------
-RUN case " $AGENT " in \
+# Google Cloud SDK - installed when BUILD_AGENTS contains claude or opencode
+RUN case " $BUILD_AGENTS " in \
     *\ claude\ *|*\ opencode\ *) \
         REPO_ARCH=$(uname -m) && \
         rpm --import https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg && \
@@ -128,79 +124,47 @@ RUN case " $AGENT " in \
     ;; \
     esac
 
-# ====================
-# Create non-root user
-# --------------------
-RUN groupadd --gid $AI_GID $AI_USER && \
-    useradd \
-      --uid $AI_UID \
-      --gid $AI_GID \
-      --home-dir /home/$AI_USER \
-      --shell /bin/bash \
-      --create-home \
-      $AI_USER
+# AI agents - installed selectively based on BUILD_AGENTS list
+RUN case " $BUILD_AGENTS " in *" gemini "*) \
+        command -v gemini >/dev/null 2>&1 ||\
+            npm install -g --prefix /usr/local @google/gemini-cli ;; esac && \
+    case " $BUILD_AGENTS " in *" claude "*) \
+        command -v claude >/dev/null 2>&1 ||\
+            npm install -g --prefix /usr/local \
+                --allow-scripts=@anthropic-ai/claude-code \
+                @anthropic-ai/claude-code ;; esac && \
+    case " $BUILD_AGENTS " in *" opencode "*) \
+        command -v opencode >/dev/null 2>&1 ||\
+            npm install -g --prefix /usr/local opencode-ai ;; esac && \
+    case " $BUILD_AGENTS " in *" copilot "*) \
+        command -v copilot >/dev/null 2>&1 ||\
+            wget -qO- https://gh.io/copilot-install | bash ;; esac && \
+    case " $BUILD_AGENTS " in *" antigravity "*) \
+        command -v agy >/dev/null 2>&1 ||\
+            curl -fsSL https://antigravity.google/cli/install.sh | \
+            bash -s -- -d "/usr/local/bin" ;; esac && \
+    case " $BUILD_AGENTS " in *" hermes-agent "*) \
+        command -v hermes-agent >/dev/null 2>&1 ||\
+            curl -fsSL https://hermes-agent.nousresearch.com/install.sh | \
+            bash -s -- --skip-setup --non-interactive --skip-browser ;; esac
 
-# =========
-# AI agents - installed selectively based on AGENT list
-# (trusted vs untrusted distinction: hermes-agent is untrusted)
-# filtering happens in glaipnir.sh script
-# ---------
-RUN case " $AGENT " in *" gemini "*) \
-        npm install -g @google/gemini-cli ;; esac && \
-    case " $AGENT " in *" claude "*) \
-        npm install -g @anthropic-ai/claude-code ;; esac && \
-    case " $AGENT " in *" opencode "*) \
-        npm install -g opencode-ai ;; esac && \
-    case " $AGENT " in *" copilot "*) \
-        wget -qO- https://gh.io/copilot-install | bash ;; esac && \
-    case " $AGENT " in *" antigravity "*) \
-        curl -fsSL https://antigravity.google/cli/install.sh | \
-        bash -s -- -d "/usr/local/bin" ;; esac && \
-    case " $AGENT " in *" hermes-agent "*) \
-        curl -fsSL https://hermes-agent.nousresearch.com/install.sh | \
-        bash -s -- --skip-setup --non-interactive --skip-browser ;; esac
+# Installers run as root and may write files in the user HOME
+RUN chown -R "${AI_USER}:" "/home/${AI_USER}"
 
-# ============
-# Copy scripts
-# ------------
+# Build script ingestion
 COPY --chmod=555 ${HOOKS_BUILD}/ /usr/local/bin/ai-agents-sandbox-build-hooks/
-COPY --chmod=755 scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
-
-# ====================================
-# Copy setup and skel for intial setup
-# ------------------------------------
-COPY --chown=$AI_UID:$AI_GID --chmod=744 \
-    agents /usr/share/ai-agents-sandbox/agents
-COPY --chown=$AI_UID:$AI_GID --chmod=744 \
-    skel   /usr/share/ai-agents-sandbox/skel
-
-# =======================
-# Config for krun microvm (needed for crun version < 1.27)
-# -----------------------
-# TODO: use krun_vm.json only for crun < 1.27 in running time.
-# The configuration file will fail the running stage with "Bad file descriptor"
-# For now better to remove it, as during the build stage, crun could be at a
-# different version from the running stage. 
-#COPY --chmod=644 .krun_vm.json          /.krun_vm.json
-
-# =============
-# RUN Build hooks
-# -------------
 RUN set -e;\
-    for script in $(find /usr/local/bin/ai-agents-sandbox-build-hooks/ \
-                    -type f \
-                    -name "*.sh" | sort); do\
-        sh "$script" || exit 1; \
-    done
+    if [ -d "/usr/local/bin/ai-agents-sandbox-build-hooks/" ]; then \
+        for script in $(find /usr/local/bin/ai-agents-sandbox-build-hooks/ \
+                        -type f \
+                        -name "*.sh" | sort); do\
+            sh "$script" || exit 1; \
+        done; \
+    fi
 
-# =============
-# Switch to non-root user for runtime
-# -------------
+# Exec config
 USER $AI_USER
 
-# =====================
-# Environment variables
-# ---------------------
 ENV HOME=/home/aiuser \
     HOSTNAME=ai-sandbox \
     CONTAINER_ID=ai-sandbox \
@@ -209,7 +173,7 @@ ENV HOME=/home/aiuser \
     GH_CONFIG_DIR=/home/aiuser/.config/gh \
     NPM_CONFIG_PREFIX=/home/aiuser/.npm-global \
     TERM=xterm-256color \
-    AGENT="${AGENT}"
+    AGENT="${BUILD_AGENTS}"
 
 WORKDIR /home/$AI_USER
 
