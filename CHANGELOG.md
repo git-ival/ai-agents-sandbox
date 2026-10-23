@@ -2,15 +2,19 @@
 
 > All notable changes to this project will be documented in this file.
 
-## [1.Y.Z] - 2026-MM-DD
+## [1.X.Y] - 2026-MM-DD
+
+## [1.2.0] - 2026-10-23
 
 * Added
   * proxy commands.
 * Changed
   * README installation guide
   * Print only the version when asked
+  * Optimize build process by using base image in registry and one multi-stage
+    Containerfile.
 * Fixed
-  * mount_point: Store the realpth in verify functions.
+  * mount_point: Store the realpath in verify functions.
 
 ## [1.1.0] - 2026-10-02
 
