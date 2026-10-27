@@ -8,7 +8,7 @@
 
 ## Pull Request
 
-* Target your Pull Request to the  `develop` branch to always get the last feat.
+* Target your Pull Request to the  `dev` branch to always get the last feat.
 
 ## Commit Message Guidelines
 
