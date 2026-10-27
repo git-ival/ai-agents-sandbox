@@ -247,7 +247,13 @@ build_install() {
 
     while true; do
 
-        [ -d "${BUILD_D}" ] || {
+        [ -f "${BUILD_D}${BINDIR}/${PRJ_ID}" ] || {
+            [ -d "${BUILD_D}" ] && {
+                build_clean || {
+                    echo "Failed to clean previous build"
+                    _rc="$FAILURE"; break
+                }
+            }
             build_main || {
                 echo "Failed to build for install"
                 _rc="$FAILURE"; break

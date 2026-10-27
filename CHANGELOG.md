@@ -4,6 +4,9 @@
 
 ## [1.X.Y] - 2026-MM-DD
 
+* Changed
+  * build: rebuild if context changes from build to install.
+
 ## [1.2.0] - 2026-10-23
 
 * Added

@@ -160,6 +160,8 @@ The build process:
   PREFIX="${HOME}/.local" ./build.sh install
   ```
 
+> `PREFIX` needs to be set accordingly in the `build` call too.
+
 * **System install under `/usr`**:
   ```bash
   PREFIX="/usr" sudo ./build.sh install
@@ -174,6 +176,7 @@ The build process:
   ```bash
   VERSION="1.2.3" ./build.sh install
   ```
+
 
 ### 4. Uninstall
 
