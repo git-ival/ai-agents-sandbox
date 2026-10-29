@@ -6,6 +6,8 @@
 
 * Changed
   * build: rebuild if context changes from build to install.
+* Fixed
+  * verify_mount_dir: verify the dir only if it exists.
 
 ## [1.2.0] - 2026-10-23
 

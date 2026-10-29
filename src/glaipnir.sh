@@ -624,7 +624,7 @@ _verify_mount_point_d() {
     fi
 
     if [ "${_ret}" != "${FAILURE}" ] && \
-        { [ ! -e "${_path}" ] || [ ! -d "${_path}" ]; }; then
+        { [ -e "${_path}" ] && [ ! -d "${_path}" ]; }; then
         print_warning "Mount point '${_path}' not a directory."
         _ret="$FAILURE"
     fi
