@@ -31,6 +31,7 @@ A secure, isolated environment for running AI coding agents:
     * `claude` - Anthropic Claude Code
     * `opencode` - Google OpenCode
     * `antigravity` - Google Antigravity-cli: `agy`
+    * `pi` - Pi coding agent: `pi`, `pi-bold`
   * **untrusted** (does not comply with SUSE internal best practices):
     * `hermes-agent` - Nous Research Hermes Agent
 

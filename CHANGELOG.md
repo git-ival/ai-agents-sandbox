@@ -4,6 +4,8 @@
 
 ## [1.X.Y] - 2026-MM-DD
 
+* Added
+  * `pi` agent support (`pi`, `pi-bold`).
 * Changed
   * build: rebuild if context changes from build to install.
 * Fixed

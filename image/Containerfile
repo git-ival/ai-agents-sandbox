@@ -63,7 +63,7 @@ COPY --chown=$AI_UID:$AI_GID --chmod=744 \
 # ----------------------------------------------------------
 FROM ${TARGET_STAGE} AS final
 
-ARG BUILD_AGENTS="copilot gemini claude opencode antigravity hermes-agent"
+ARG BUILD_AGENTS="copilot gemini claude opencode antigravity pi hermes-agent"
 ARG IMG_TAG="0.0.0"
 ARG AI_USER=aiuser
 ARG REPOS=""
@@ -108,9 +108,9 @@ RUN case " $BUILD_AGENTS " in \
     ;; \
     esac
 
-# Google Cloud SDK - installed when BUILD_AGENTS contains claude or opencode
+# Google Cloud SDK - installed when BUILD_AGENTS contains claude, pi or opencode
 RUN case " $BUILD_AGENTS " in \
-    *\ claude\ *|*\ opencode\ *) \
+    *\ claude\ *|*\ opencode\ *|*\ pi\ *) \
         REPO_ARCH=$(uname -m) && \
         rpm --import https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg && \
         zypper refresh && \
@@ -143,10 +143,23 @@ RUN case " $BUILD_AGENTS " in *" gemini "*) \
         command -v agy >/dev/null 2>&1 ||\
             curl -fsSL https://antigravity.google/cli/install.sh | \
             bash -s -- -d "/usr/local/bin" ;; esac && \
+    case " $BUILD_AGENTS " in *" pi "*) \
+        command -v pi >/dev/null 2>&1 ||\
+            zypper --non-interactive install --no-recommends pi-coding-agent && \
+            zypper clean --all && \
+            rm -rf /var/cache/zypp/* ;; esac && \
     case " $BUILD_AGENTS " in *" hermes-agent "*) \
         command -v hermes-agent >/dev/null 2>&1 ||\
             curl -fsSL https://hermes-agent.nousresearch.com/install.sh | \
             bash -s -- --skip-setup --non-interactive --skip-browser ;; esac
+
+# pi-bolt - installed when BUILD_AGENTS contains pi
+RUN case " $BUILD_AGENTS " in \
+    *\ pi\ *) \
+        command -v pi-bolt >/dev/null 2>&1 ||\
+            npm install -g --prefix /usr/local --allow-scripts=pi-bolt pi-bolt \
+    ;; \
+    esac
 
 # Installers run as root and may write files in the user HOME
 RUN chown -R "${AI_USER}:" "/home/${AI_USER}"

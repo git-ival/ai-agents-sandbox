@@ -25,7 +25,7 @@ WORKSPACE_D="${AI_WORKSPACE:-$HOME/workspace}"
 
 # Default agent list (contains both trusted and untrusted agents)
 # filtering happens in glaipnir.sh script
-AGENT="${AGENT:-claude copilot gemini opencode antigravity hermes-agent}"
+AGENT="${AGENT:-claude copilot gemini opencode antigravity pi hermes-agent}"
 VERSION="${AI_SANDBOX_VERSION:-0.0.0}"
 BANNER_HEADLINE="AI AGENTS SANDBOX"
 
@@ -83,6 +83,13 @@ opencode_auth_check() {
         [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ] && \
             [ -f "$GOOGLE_APPLICATION_CREDENTIALS" ]
     }
+}
+
+# Return true when Pi has an active login or API key auth.
+pi_auth_check() {
+    _auth_f="$HOME/.pi/agent/auth.json"
+    [ -f "${_auth_f}" ] && \
+        ! jq -e '. == {}' < "${_auth_f}" > /dev/null 2>&1
 }
 
 # Print the banner header
@@ -222,6 +229,13 @@ agent_enabled "antigravity" &&\
         "Only cli is installed: agy" \
         "When you authenticate through Google OAuth, the link provided can" \
         "integrate some spaces, be careful when you copy-paste the URL."
+agent_enabled "pi" &&\
+    banner_agent "Pi" "pi --version" \
+        "pi_auth_check" \
+        "pi  (then: /login)" &&\
+    banner_notes \
+        "Also available: pi-bold" \
+        "Config lives at ~/.pi/agent/"
 # Print disclaimer note for untrusted Hermes Agent
 agent_enabled "hermes-agent" &&\
     banner_agent "Hermes Agent (untrusted)" "hermes --version" \

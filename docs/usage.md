@@ -77,7 +77,7 @@ Glaipnir supports per-project configuration as well as global user defaults:
 ### Example `.glaipnir.conf`
 
 ```conf
-# Preferred agents (e.g. claude, gemini, copilot, opencode, antigravity, hermes)
+# Preferred agents (e.g. claude, gemini, copilot, opencode, antigravity, pi, hermes)
 AGENTs=claude
 
 # Target workspace directory

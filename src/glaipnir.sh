@@ -58,7 +58,7 @@ DEFAULT_IMG_REPO="registry.opensuse.org/home/vlefebvre/container-images/containe
 IMG_NAME="${SANDBOX_ID}"
 CTN_NAME="${SANDBOX_ID}"
 IMG_TAG="1.2.0"
-TRUSTED_AGENTS="copilot claude gemini opencode antigravity agy"
+TRUSTED_AGENTS="copilot claude gemini opencode antigravity agy pi"
 UNTRUSTED_AGENTS="hermes-agent"
 UNTRUSTED_AGENTS_SENSITIVE_ACTIONS="build run"
 AI_USER_NAME="aiuser"
@@ -859,7 +859,7 @@ _bind_agent_mounts() {
     # claude (Vertex) + opencode share ~/.config/gcloud/
     # Never copy the ADC, cloud identity, from the host.
     # case " $AGENT " in *" claude "*|*" opencode "*)
-    case " $AGENT " in *" claude "*|*" opencode "*)
+    case " $AGENT " in *" claude "*|*" opencode "*|*" pi "*)
         if [ "$_gcloud_mounted" = "0" ]; then
             mkdir -p "$_mount_d/.config/gcloud"
             _mounts="$_mounts \
@@ -874,6 +874,13 @@ _bind_agent_mounts() {
         _copy_host_files "${_host_cfg_d}/opencode" "$_mount_d/.config/opencode"
         _mounts="$_mounts \
 --volume $_mount_d/.config/opencode:$_home/.config/opencode:z"
+    ;; esac
+
+    # pi
+    case " $AGENT " in *" pi "*)
+        mkdir -p "$_mount_d/.pi"
+        _copy_host_files "${HOME}/.pi" "$_mount_d/.pi"
+        _mounts="$_mounts --volume $_mount_d/.pi:$_home/.pi:z"  
     ;; esac
 
     # hermes-agent

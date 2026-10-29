@@ -68,6 +68,7 @@ ai-agents-sandbox/
       .claude.json claude (file — pre-touched)
       .copilot/    copilot
       .gemini/     gemini + antigravity
+      .pi/         pi
       .hermes/     hermes-agent
   ```
 
@@ -93,6 +94,7 @@ ai-agents-sandbox/
 | Claude Code | `claude` | `claude auth login` | Trusted |
 | OpenCode | `opencode` | configure `opencode.json` | Trusted |
 | antigravity | `agy` | run `agy` | Trusted |
+| Pi | `pi`, `pi-bold` | run `pi`, then `/login` | Trusted |
 | Hermes Agent | `hermes` | `hermes setup` | Untrusted |
 
 ---
@@ -319,6 +321,7 @@ includes every agent. Use an agent name as an extra argument to produce a
 | `build gemini` | `ai-agents-sandbox-gemini` | gemini-cli | Trusted |
 | `build claude` | `ai-agents-sandbox-claude` | gcloud + claude | Trusted |
 | `build opencode` | `ai-agents-sandbox-opencode` | opencode-ai | Trusted |
+| `build pi` | `ai-agents-sandbox-pi` | pi, pi-bold | Trusted |
 | `build hermes-agent` | `ai-agents-sandbox-hermes-agent` | hermes | Untrusted |
 
 The corresponding `run <?agent>` and `clean <?agent> [all]` commands
