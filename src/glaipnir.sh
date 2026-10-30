@@ -878,6 +878,12 @@ _bind_agent_mounts() {
         _copy_host_files "${_host_cfg_d}/opencode" "$_mount_d/.config/opencode"
         _mounts="$_mounts \
 --volume $_mount_d/.config/opencode:$_home/.config/opencode:z"
+        _host_data_d="${XDG_DATA_HOME:-${HOME}/.local/share}"
+        _copy_host_files "$_host_data_d/opencode" \
+            "$_mount_d/.local/share/opencode"
+        mkdir -p "$_mount_d/.local/share/opencode"
+        _mounts="$_mounts \
+--volume $_mount_d/.local/share/opencode:$_home/.local/share/opencode:z"
     ;; esac
 
     # pi
